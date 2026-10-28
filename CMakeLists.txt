@@ -37,6 +37,7 @@ set(SOURCES
     src/main.cpp
     src/capture/capture.cpp
     src/capture/duplicationApiCapture.cpp
+    src/capture/winrtCapture.cpp
     src/config/config.cpp
     src/detection/detector.cpp
     src/detection/postProcess.cpp
@@ -87,6 +88,7 @@ target_link_libraries(ai_colorbot PRIVATE
     winmm
     dxgi
     d3d11
+    windowsapp
 )
 
 # ── Compile definitions ────────────────────────────────────────────────────────

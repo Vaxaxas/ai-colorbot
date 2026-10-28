@@ -9,6 +9,7 @@ class Config
 {
 public:
     // Capture
+    std::string capture_method;
     int   detection_resolution;
     int   capture_fps;
     int   monitor_idx;
@@ -21,6 +22,8 @@ public:
     float head_y_offset;
 
     // Mouse / PID
+    std::string makcu_ip;
+    int         makcu_port;
     int    dpi;
     float  sensitivity;
     int    fovX;
@@ -28,6 +31,10 @@ public:
     double pid_kp;
     double pid_ki;
     double pid_kd;
+
+    // Keybinds
+    int aimbot_key;
+    int triggerbot_key;
 
     // AI / TensorRT
     std::string ai_model;

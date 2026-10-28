@@ -95,6 +95,22 @@ void udpListenerThread()
     WSACleanup();
 }
 
+static bool isKeyActive(int key)
+{
+    if (key <= 0) return false;
+    int vk = 0;
+    if (key == 1) vk = VK_LBUTTON;
+    else if (key == 2) vk = VK_RBUTTON;
+    else if (key == 3) vk = VK_MBUTTON;
+    else if (key == 4) vk = VK_XBUTTON1;
+    else if (key == 5) vk = VK_XBUTTON2;
+    else if (key == 16) vk = VK_SHIFT;
+    else if (key == 18) vk = VK_MENU;
+    else vk = key;
+
+    return (GetAsyncKeyState(vk) & 0x8000) != 0;
+}
+
 // Consumes detection results, drives PID mouse movement, and triggers
 // auto-click when the nearest target is within the center deadzone.
 void mouseThreadFunction(MouseThread& mouseThread)
@@ -108,6 +124,7 @@ void mouseThreadFunction(MouseThread& mouseThread)
     auto lastShotTime = Clock::now() - std::chrono::milliseconds(300);
     const double centerDeadzone = 5.0;
     const std::chrono::duration<double> cooldown(0.3);
+    static bool lastAimState = false;
 
     while (!shouldExit.load())
     {
@@ -157,8 +174,15 @@ void mouseThreadFunction(MouseThread& mouseThread)
             config.disable_headshot
         );
 
-        bool doAim    = netAimbot.load();
-        bool doTrigger = netTrigger.load();
+        bool doAim     = netAimbot.load() || isKeyActive(config.aimbot_key);
+        bool doTrigger = netTrigger.load() || isKeyActive(config.triggerbot_key);
+
+        if (doAim != lastAimState)
+        {
+            lastAimState = doAim;
+            if (doAim && config.verbose)
+                std::cout << "[Aim] Key active -> tracking" << std::endl;
+        }
 
         if (target)
         {

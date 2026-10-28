@@ -1,6 +1,8 @@
 // Makcu serial connection: baudrate negotiation and command protocol.
 // Commands: km.move(x,y), km.left(1/0), km.buttons(1), km.version()
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <iostream>
 #include <string>
@@ -9,6 +11,7 @@
 #include <mutex>
 #include "input/makcuConnection.h"
 #include "app.h"
+#include "config/config.h"
 
 void MakcuConnection::flushBuffers()
 {
@@ -16,8 +19,36 @@ void MakcuConnection::flushBuffers()
     Sleep(100);
 }
 
-MakcuConnection::MakcuConnection() : is_open_(false), listening_(false)
+MakcuConnection::MakcuConnection()
+    : is_open_(false),
+      listening_(false),
+      is_udp_(false),
+      udp_socket_(INVALID_SOCKET)
 {
+    if (!config.makcu_ip.empty())
+    {
+        WSADATA wsaData;
+        WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+        udp_socket_ = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (udp_socket_ != INVALID_SOCKET)
+        {
+            udp_addr_.sin_family = AF_INET;
+            udp_addr_.sin_port = htons(static_cast<u_short>(config.makcu_port));
+            inet_pton(AF_INET, config.makcu_ip.c_str(), &udp_addr_.sin_addr);
+
+            is_udp_ = true;
+            is_open_ = true;
+            std::cout << "[Makcu] Connected via UDP to " << config.makcu_ip
+                      << ":" << config.makcu_port << std::endl;
+            return;
+        }
+        else
+        {
+            std::cerr << "[Makcu] Failed to create UDP socket, trying serial.\n";
+        }
+    }
+
     std::string portStr = findPort();
     if (portStr.empty()) {
         std::cerr << "[Makcu] No COM port found.\n";
@@ -95,6 +126,13 @@ MakcuConnection::~MakcuConnection()
     listening_ = false;
     if (listening_thread_.joinable())
         listening_thread_.join();
+
+    if (is_udp_ && udp_socket_ != INVALID_SOCKET)
+    {
+        closesocket(udp_socket_);
+        udp_socket_ = INVALID_SOCKET;
+    }
+
     if (serial_.isOpen())
         serial_.close();
 }
@@ -104,6 +142,13 @@ bool MakcuConnection::isOpen() const { return is_open_; }
 void MakcuConnection::write(const std::string& data)
 {
     std::lock_guard<std::mutex> lk(write_mutex_);
+    if (is_udp_)
+    {
+        sendto(udp_socket_, data.c_str(), static_cast<int>(data.size()), 0,
+               reinterpret_cast<const sockaddr*>(&udp_addr_), sizeof(udp_addr_));
+        return;
+    }
+
     if (is_open_) {
         try { serial_.write(data); }
         catch (...) { is_open_ = false; }
@@ -125,15 +170,37 @@ std::string MakcuConnection::read()
 
 void MakcuConnection::move(int x, int y)
 {
-    sendCommand("km.move(" + std::to_string(x) + "," + std::to_string(y) + ")");
+    if (is_udp_)
+        sendCommand("km.move_now(" + std::to_string(x) + "," + std::to_string(y) + ")");
+    else
+        sendCommand("km.move(" + std::to_string(x) + "," + std::to_string(y) + ")");
 }
 
-void MakcuConnection::press()   { sendCommand("km.left(1)"); }
-void MakcuConnection::release() { sendCommand("km.left(0)"); }
+void MakcuConnection::press()
+{
+    if (is_udp_)
+        sendCommand("km.click(1)");
+    else
+        sendCommand("km.left(1)");
+}
+
+void MakcuConnection::release()
+{
+    if (!is_udp_)
+        sendCommand("km.left(0)");
+}
 
 void MakcuConnection::sendCommand(const std::string& cmd)
 {
     std::lock_guard<std::mutex> lk(write_mutex_);
+    if (is_udp_)
+    {
+        std::string payload = cmd + "\r\n";
+        sendto(udp_socket_, payload.c_str(), static_cast<int>(payload.size()), 0,
+               reinterpret_cast<const sockaddr*>(&udp_addr_), sizeof(udp_addr_));
+        return;
+    }
+
     if (!serial_.isOpen()) return;
     try { serial_.write(cmd + "\r"); }
     catch (...) { is_open_ = false; }

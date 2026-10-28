@@ -46,3 +46,6 @@ __pycache__/
 # Misc
 *.log
 *.bak
+
+# Third-party dependencies built locally
+third_party/serial/

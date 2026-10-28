@@ -23,6 +23,7 @@
 #include "app.h"
 #include "util/otherTools.h"
 #include "capture/duplicationApiCapture.h"
+#include "capture/winrtCapture.h"
 
 cv::cuda::GpuMat latestFrameGpu;
 cv::Mat          latestFrameCpu;
@@ -36,6 +37,29 @@ std::atomic<int> captureFrameCount(0);
 std::atomic<int> captureFps(0);
 std::chrono::time_point<std::chrono::high_resolution_clock> captureFpsStartTime;
 
+static IScreenCapture* createCapturer(int monitorIdx, int width, int height)
+{
+    if (config.capture_method == "duplication_api")
+    {
+        if (config.verbose)
+            std::cout << "[Capture] Using Duplication API on monitor " << monitorIdx << std::endl;
+        return new DuplicationAPIScreenCapture(monitorIdx, width, height);
+    }
+
+    // Default to WinRT (Windows.Graphics.Capture)
+    auto winrt = new WinRTScreenCapture(monitorIdx, width, height);
+    if (winrt->IsInitialized())
+    {
+        if (config.verbose)
+            std::cout << "[Capture] Using WinRT capture on monitor " << monitorIdx << std::endl;
+        return winrt;
+    }
+
+    std::cerr << "[Capture] WinRT capture failed, falling back to Duplication API..." << std::endl;
+    delete winrt;
+    return new DuplicationAPIScreenCapture(monitorIdx, width, height);
+}
+
 void captureThread(int captureWidth, int captureHeight)
 {
     try
@@ -47,12 +71,8 @@ void captureThread(int captureWidth, int captureHeight)
                       << cv::cuda::getCudaEnabledDeviceCount() << std::endl;
         }
 
-        IScreenCapture* capturer = new DuplicationAPIScreenCapture(
+        IScreenCapture* capturer = createCapturer(
             config.monitor_idx, captureWidth, captureHeight);
-
-        if (config.verbose)
-            std::cout << "[Capture] Using Duplication API on monitor "
-                      << config.monitor_idx << std::endl;
 
         bool frameLimitingEnabled = false;
         std::chrono::duration<double, std::milli> frameDuration(0);
@@ -100,10 +120,10 @@ void captureThread(int captureWidth, int captureHeight)
             {
                 delete capturer;
                 int newSize = config.detection_resolution;
-                capturer = new DuplicationAPIScreenCapture(
+                capturer = createCapturer(
                     config.monitor_idx, newSize, newSize);
                 if (config.verbose)
-                    std::cout << "[Capture] Re-init duplication API" << std::endl;
+                    std::cout << "[Capture] Re-init capturer (" << config.capture_method << ")" << std::endl;
                 detection_resolution_changed.store(false);
             }
 

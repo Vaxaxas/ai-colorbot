@@ -44,6 +44,7 @@ bool Config::loadConfig(const std::string& filename)
     {
         std::cerr << "[Config] No config found, creating defaults: " << filename << "\n";
 
+        capture_method       = "winrt";
         detection_resolution = 320;
         capture_fps          = 100;
         monitor_idx          = 0;
@@ -54,6 +55,8 @@ bool Config::loadConfig(const std::string& filename)
         body_y_offset        = 0.25f;
         head_y_offset        = 0.60f;
 
+        makcu_ip             = "192.168.137.19";
+        makcu_port           = 5005;
         dpi                  = 1000;
         sensitivity          = 0.48f;
         fovX                 = 50;
@@ -62,12 +65,15 @@ bool Config::loadConfig(const std::string& filename)
         pid_ki               = 0.000;
         pid_kd               = 0.0000;
 
+        aimbot_key           = 2;
+        triggerbot_key       = 4;
+
         ai_model             = "yolo10.engine";
         confidence_threshold = 0.25f;
         nms_threshold        = 0.50f;
         max_detections       = 100;
         postprocess          = "yolo10";
-        export_precision     = 8;
+        export_precision     = 16;
 
         use_cuda_graph       = false;
         use_pinned_memory    = true;
@@ -101,12 +107,18 @@ bool Config::loadConfig(const std::string& filename)
     }
 
     auto getString = [&](const char* key, const char* def) {
-        return std::string(ini.GetValue("", key, def));
+        std::string val = ini.GetValue("", key, def);
+        auto pos = val.find_first_of(";#");
+        if (pos != std::string::npos) val = val.substr(0, pos);
+        while (!val.empty() && isspace(static_cast<unsigned char>(val.front()))) val.erase(val.begin());
+        while (!val.empty() && isspace(static_cast<unsigned char>(val.back()))) val.pop_back();
+        return val;
     };
     auto getBool   = [&](const char* key, bool def)   { return ini.GetBoolValue("", key, def); };
     auto getLong   = [&](const char* key, long def)   { return static_cast<int>(ini.GetLongValue("", key, def)); };
     auto getDouble = [&](const char* key, double def) { return ini.GetDoubleValue("", key, def); };
 
+    capture_method       = getString("capture_method", "winrt");
     detection_resolution = getLong("detection_resolution", 320);
     capture_fps          = getLong("capture_fps", 100);
     monitor_idx          = getLong("monitor_idx", 0);
@@ -117,6 +129,8 @@ bool Config::loadConfig(const std::string& filename)
     body_y_offset    = static_cast<float>(getDouble("body_y_offset", 0.25));
     head_y_offset    = static_cast<float>(getDouble("head_y_offset", 0.60));
 
+    makcu_ip    = getString("makcu_ip", "192.168.137.19");
+    makcu_port  = getLong("makcu_port", 5005);
     dpi         = getLong("dpi", 800);
     sensitivity = static_cast<float>(getDouble("sensitivity", 0.40));
     fovX        = getLong("fovX", 50);
@@ -125,12 +139,15 @@ bool Config::loadConfig(const std::string& filename)
     pid_ki      = getDouble("pid_ki", 0.000);
     pid_kd      = getDouble("pid_kd", 0.0000);
 
+    aimbot_key     = getLong("aimbot_key", 2);
+    triggerbot_key = getLong("triggerbot_key", 4);
+
     ai_model             = getString("ai_model", "yolo10.engine");
     confidence_threshold = static_cast<float>(getDouble("confidence_threshold", 0.25));
     nms_threshold        = static_cast<float>(getDouble("nms_threshold", 0.50));
     max_detections       = getLong("max_detections", 100);
     postprocess          = getString("postprocess", "yolo10");
-    export_precision     = getLong("export_precision", 8);
+    export_precision     = getLong("export_precision", 16);
 
     use_cuda_graph    = getBool("use_cuda_graph", true);
     use_pinned_memory = getBool("use_pinned_memory", true);
@@ -185,6 +202,7 @@ bool Config::saveConfig(const std::string& filename)
     }
 
     file << "# Capture\n"
+         << "capture_method = "       << capture_method       << "\n"
          << "detection_resolution = " << detection_resolution << "\n"
          << "capture_fps = "          << capture_fps          << "\n"
          << "monitor_idx = "          << monitor_idx          << "\n"
@@ -198,6 +216,8 @@ bool Config::saveConfig(const std::string& filename)
          << "head_y_offset = "    << head_y_offset    << "\n\n";
 
     file << "# Mouse\n"
+         << "makcu_ip = "    << makcu_ip    << "\n"
+         << "makcu_port = "  << makcu_port  << "\n"
          << "dpi = "         << dpi         << "\n"
          << std::fixed << std::setprecision(1)
          << "sensitivity = " << sensitivity << "\n"
@@ -208,6 +228,10 @@ bool Config::saveConfig(const std::string& filename)
          << "pid_kp = "      << pid_kp      << "\n"
          << "pid_ki = "      << pid_ki      << "\n"
          << "pid_kd = "      << pid_kd      << "\n\n";
+
+    file << "# Keybinds\n"
+         << "aimbot_key = "     << aimbot_key     << "\n"
+         << "triggerbot_key = " << triggerbot_key << "\n\n";
 
     file << "# AI\n"
          << "ai_model = "           << ai_model             << "\n"

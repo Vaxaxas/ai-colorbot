@@ -4,6 +4,8 @@
 #define MAKCU_CONNECTION_H
 
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <string>
 #include <vector>
@@ -48,6 +50,10 @@ private:
     std::atomic<bool> listening_{false};
     std::thread       listening_thread_;
     std::mutex        write_mutex_;
+
+    bool              is_udp_{false};
+    SOCKET            udp_socket_{INVALID_SOCKET};
+    sockaddr_in       udp_addr_{};
 
     std::atomic<bool> left_{false};
     std::atomic<bool> right_{false};
