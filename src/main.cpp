@@ -286,9 +286,13 @@ int main()
         welcomeMessage();
         displayThread();
 
-        detThread.join();
-        mouseMovThread.join();
-        overlayThd.join();
+        shouldExit.store(true);
+        frameCV.notify_all();
+        detector.stop();
+
+        if (detThread.joinable()) detThread.join();
+        if (mouseMovThread.joinable()) mouseMovThread.join();
+        if (overlayThd.joinable()) overlayThd.join();
 
         return 0;
     }

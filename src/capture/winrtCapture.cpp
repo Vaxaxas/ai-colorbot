@@ -260,16 +260,21 @@ cv::cuda::GpuMat WinRTScreenCapture::GetNextFrameGpu()
                 winrt::com_ptr<ID3D11Texture2D> surfaceTex;
                 if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&surfaceTex))) && surfaceTex)
                 {
-                    D3D11_BOX box{
-                        static_cast<UINT>((screenWidth  - regionWidth)  / 2),
-                        static_cast<UINT>((screenHeight - regionHeight) / 2),
-                        0u,
-                        static_cast<UINT>((screenWidth  + regionWidth)  / 2),
-                        static_cast<UINT>((screenHeight + regionHeight) / 2),
-                        1u
-                    };
-                    d3dContext->CopySubresourceRegion(sharedTexture, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
-                    m_hasValidFrame = true;
+                    D3D11_TEXTURE2D_DESC desc;
+                    surfaceTex->GetDesc(&desc);
+                    UINT texW = desc.Width;
+                    UINT texH = desc.Height;
+                    UINT startX = (texW > static_cast<UINT>(regionWidth)) ? (texW - regionWidth) / 2 : 0;
+                    UINT startY = (texH > static_cast<UINT>(regionHeight)) ? (texH - regionHeight) / 2 : 0;
+                    UINT endX = startX + regionWidth;
+                    UINT endY = startY + regionHeight;
+
+                    if (endX <= texW && endY <= texH)
+                    {
+                        D3D11_BOX box{ startX, startY, 0u, endX, endY, 1u };
+                        d3dContext->CopySubresourceRegion(sharedTexture, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
+                        m_hasValidFrame = true;
+                    }
                 }
             }
             catch (...) {}
@@ -315,27 +320,32 @@ cv::Mat WinRTScreenCapture::GetNextFrameCpu()
                 winrt::com_ptr<ID3D11Texture2D> surfaceTex;
                 if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&surfaceTex))) && surfaceTex)
                 {
-                    D3D11_BOX box{
-                        static_cast<UINT>((screenWidth  - regionWidth)  / 2),
-                        static_cast<UINT>((screenHeight - regionHeight) / 2),
-                        0u,
-                        static_cast<UINT>((screenWidth  + regionWidth)  / 2),
-                        static_cast<UINT>((screenHeight + regionHeight) / 2),
-                        1u
-                    };
-                    d3dContext->CopySubresourceRegion(stagingTextureCPU, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
+                    D3D11_TEXTURE2D_DESC desc;
+                    surfaceTex->GetDesc(&desc);
+                    UINT texW = desc.Width;
+                    UINT texH = desc.Height;
+                    UINT startX = (texW > static_cast<UINT>(regionWidth)) ? (texW - regionWidth) / 2 : 0;
+                    UINT startY = (texH > static_cast<UINT>(regionHeight)) ? (texH - regionHeight) / 2 : 0;
+                    UINT endX = startX + regionWidth;
+                    UINT endY = startY + regionHeight;
 
-                    D3D11_MAPPED_SUBRESOURCE mapped;
-                    if (SUCCEEDED(d3dContext->Map(stagingTextureCPU, 0, D3D11_MAP_READ, 0, &mapped)))
+                    if (endX <= texW && endY <= texH)
                     {
-                        for (int y = 0; y < regionHeight; ++y)
+                        D3D11_BOX box{ startX, startY, 0u, endX, endY, 1u };
+                        d3dContext->CopySubresourceRegion(stagingTextureCPU, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
+
+                        D3D11_MAPPED_SUBRESOURCE mapped;
+                        if (SUCCEEDED(d3dContext->Map(stagingTextureCPU, 0, D3D11_MAP_READ, 0, &mapped)))
                         {
-                            memcpy(m_cachedCpuFrame.ptr(y),
-                                   static_cast<BYTE*>(mapped.pData) + y * mapped.RowPitch,
-                                   static_cast<size_t>(regionWidth) * 4);
+                            for (int y = 0; y < regionHeight; ++y)
+                            {
+                                memcpy(m_cachedCpuFrame.ptr(y),
+                                       static_cast<BYTE*>(mapped.pData) + y * mapped.RowPitch,
+                                       static_cast<size_t>(regionWidth) * 4);
+                            }
+                            d3dContext->Unmap(stagingTextureCPU, 0);
+                            m_hasValidFrame = true;
                         }
-                        d3dContext->Unmap(stagingTextureCPU, 0);
-                        m_hasValidFrame = true;
                     }
                 }
             }

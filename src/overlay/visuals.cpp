@@ -60,7 +60,7 @@ void displayThread()
             else
             {
                 std::unique_lock<std::mutex> lock(frameMutex);
-                frameCV.wait(lock, [] { return !latestFrameCpu.empty() || shouldExit.load(); });
+                frameCV.wait_for(lock, std::chrono::milliseconds(30), [] { return !latestFrameCpu.empty() || shouldExit.load(); });
                 if (shouldExit) break;
                 frame = latestFrameCpu.clone();
             }
@@ -125,8 +125,7 @@ void displayThread()
             }
 
             cv::imshow("Debug", displayFrame);
-            if (cv::waitKey(1) == 27)
-                shouldExit = true;
+            cv::waitKey(1);
         }
         else
         {

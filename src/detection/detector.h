@@ -30,6 +30,7 @@ public:
     void initialize(const std::string& modelFile);
     void processFrame(const cv::cuda::GpuMat& frame);
     void inferenceThread();
+    void stop();
 
     void releaseDetections();
     bool getLatestDetections(std::vector<cv::Rect>& boxes, std::vector<int>& classes);
@@ -78,7 +79,7 @@ private:
 
     std::mutex inferenceMutex;
     std::condition_variable inferenceCV;
-    std::atomic<bool> shouldExit{false};
+    std::atomic<bool> m_shouldExit{false};
     cv::cuda::GpuMat currentFrame;
     cv::Mat          currentFrameBGR;
     bool             frameReady = false;

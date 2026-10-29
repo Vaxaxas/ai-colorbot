@@ -27,6 +27,7 @@
 #include "app.h"
 #include "util/otherTools.h"
 #include "detection/postProcess.h"
+#include "capture/capture.h"
 
 extern std::atomic<bool> detector_model_changed;
 extern std::atomic<bool> detection_resolution_changed;
@@ -35,7 +36,7 @@ static bool errorLogged = false;
 
 Detector::Detector()
     : frameReady(false),
-      shouldExit(false),
+      m_shouldExit(false),
       detectionVersion(0),
       inputBufferDevice(nullptr),
       img_scale(1.0f),
@@ -362,9 +363,16 @@ void Detector::processFrame(const cv::cuda::GpuMat& frame)
     inferenceCV.notify_one();
 }
 
+void Detector::stop()
+{
+    m_shouldExit.store(true);
+    inferenceCV.notify_all();
+    detectionCV.notify_all();
+}
+
 void Detector::inferenceThread()
 {
-    while (!shouldExit)
+    while (!m_shouldExit.load() && !shouldExit.load())
     {
         if (detector_model_changed.load())
         {
@@ -388,9 +396,11 @@ void Detector::inferenceThread()
 
         {
             std::unique_lock<std::mutex> lock(inferenceMutex);
-            if (!frameReady && !shouldExit)
-                inferenceCV.wait(lock, [this] { return frameReady || shouldExit; });
-            if (shouldExit) break;
+            if (!frameReady && !m_shouldExit.load() && !shouldExit.load())
+                inferenceCV.wait_for(lock, std::chrono::milliseconds(50), [this] {
+                    return frameReady || m_shouldExit.load() || shouldExit.load();
+                });
+            if (m_shouldExit.load() || shouldExit.load()) break;
             if (frameReady)
             {
                 frame = std::move(currentFrame);
@@ -566,11 +576,13 @@ void Detector::postProcess(const float* output, const std::string& outputName)
         for (const auto& det : detections)
         {
             int classId = static_cast<int>(det.classId);
+            if (classId < 0 || classId >= static_cast<int>(config.detect.size())) continue;
             if (!config.detect[classId]) continue;
 
+            if (currentFrameBGR.empty()) continue;
             cv::Rect box = det.box & cv::Rect(0, 0,
                 currentFrameBGR.cols, currentFrameBGR.rows);
-            if (box.area() == 0) continue;
+            if (box.area() <= 0 || box.width <= 0 || box.height <= 0) continue;
 
             // Head boxes nested inside a body box skip color filtering
             if (classId == config.class_head)
