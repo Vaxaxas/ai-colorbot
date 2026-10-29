@@ -116,8 +116,24 @@ void MouseThread::pidMove(double targetX, double targetY)
     if (dt > 0.1)   dt = 0.1;
     last_pid_time = now;
 
-    integral_x += errorX * dt;
-    integral_y += errorY * dt;
+    if (first_frame) {
+        prev_error_x = errorX;
+        prev_error_y = errorY;
+        first_frame = false;
+    }
+
+    // Leaky anti-windup integration: only accumulate when near target (< 25px) to prevent overshoot
+    if (std::abs(errorX) < 25.0) {
+        integral_x = std::clamp(integral_x + errorX * dt, -40.0, 40.0);
+    } else {
+        integral_x *= 0.75;
+    }
+
+    if (std::abs(errorY) < 25.0) {
+        integral_y = std::clamp(integral_y + errorY * dt, -40.0, 40.0);
+    } else {
+        integral_y *= 0.75;
+    }
 
     double derivX = (errorX - prev_error_x) / dt;
     double derivY = (errorY - prev_error_y) / dt;
@@ -125,8 +141,15 @@ void MouseThread::pidMove(double targetX, double targetY)
     prev_error_x = errorX;
     prev_error_y = errorY;
 
-    double outputX = kp * errorX + ki * integral_x + kd * derivX;
-    double outputY = kp * errorY + ki * integral_y + kd * derivY;
+    // Error-scaled dynamic gain: smooth settling near target
+    double errDist = std::hypot(errorX, errorY);
+    double dynamicKp = kp;
+    if (errDist < 12.0) {
+        dynamicKp = kp * (0.65 + 0.35 * (errDist / 12.0));
+    }
+
+    double outputX = dynamicKp * errorX + ki * integral_x + kd * derivX;
+    double outputY = dynamicKp * errorY + ki * integral_y + kd * derivY;
 
     // Empirically fitted sensitivity→physical-pixel scale factor
     double sensFactor = 1.07437623 * std::pow(mouse_sensitivity, -0.9936827126);
@@ -187,6 +210,12 @@ void MouseThread::resetPID()
     std::lock_guard<std::mutex> lg(input_method_mutex);
     integral_x = integral_y = 0.0;
     prev_error_x = prev_error_y = 0.0;
+    first_frame = true;
     last_pid_time = std::chrono::steady_clock::now();
     remainder_x = remainder_y = 0.0;
+    {
+        std::lock_guard<std::mutex> ql(queueMtx);
+        std::queue<Move> empty;
+        std::swap(moveQueue, empty);
+    }
 }

@@ -33,6 +33,7 @@ private:
     double kp, ki, kd;
     double integral_x, integral_y;
     double prev_error_x, prev_error_y;
+    bool   first_frame = true;
     std::chrono::steady_clock::time_point last_pid_time;
     double dtMin; // minimum dt clamp (= 1 / capture_fps)
 

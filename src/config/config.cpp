@@ -127,7 +127,7 @@ bool Config::loadConfig(const std::string& filename)
         if (val.empty()) return static_cast<int>(def);
         try {
             size_t idx = 0;
-            long res = std::stol(val, &idx, 0);
+            long res = std::stol(val, &idx, 10);
             return (idx == val.size()) ? static_cast<int>(res) : static_cast<int>(def);
         } catch (...) {
             return static_cast<int>(def);
