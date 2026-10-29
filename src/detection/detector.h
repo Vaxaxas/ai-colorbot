@@ -81,7 +81,7 @@ private:
     std::condition_variable inferenceCV;
     std::atomic<bool> m_shouldExit{false};
     cv::cuda::GpuMat currentFrame;
-    cv::Mat          currentFrameBGR;
+    cv::cuda::GpuMat latestInferenceFrameGpu;
     bool             frameReady = false;
 
     void loadEngine(const std::string& engineFile);

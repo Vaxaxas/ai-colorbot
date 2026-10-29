@@ -405,15 +405,7 @@ void Detector::inferenceThread()
             if (frameReady)
             {
                 frame = std::move(currentFrame);
-                bool needColorFilter = false;
-                {
-                    std::lock_guard<std::mutex> cfgLock(configMutex);
-                    for (bool c : config.color) {
-                        if (c) { needColorFilter = true; break; }
-                    }
-                }
-                if (needColorFilter)
-                    frame.download(currentFrameBGR);
+                latestInferenceFrameGpu = frame;
                 frameReady   = false;
                 hasNewFrame  = true;
             }
@@ -626,8 +618,8 @@ void Detector::postProcess(const float* output, const std::string& outputName)
             if (classId < 0 || classId >= static_cast<int>(config.detect.size())) continue;
             if (!config.detect[classId]) continue;
 
-            int boundW = currentFrameBGR.empty() ? detRes : currentFrameBGR.cols;
-            int boundH = currentFrameBGR.empty() ? detRes : currentFrameBGR.rows;
+            int boundW = latestInferenceFrameGpu.empty() ? detRes : latestInferenceFrameGpu.cols;
+            int boundH = latestInferenceFrameGpu.empty() ? detRes : latestInferenceFrameGpu.rows;
             cv::Rect box = det.box & cv::Rect(0, 0, boundW, boundH);
             if (box.area() <= 0 || box.width <= 0 || box.height <= 0) continue;
 
@@ -655,14 +647,24 @@ void Detector::postProcess(const float* output, const std::string& outputName)
                 ? config.color[classId]
                 : false;
 
-            if (!useColor || currentFrameBGR.empty())
+            if (!useColor || latestInferenceFrameGpu.empty())
             {
                 detectedBoxes.push_back(box);
                 detectedClasses.push_back(classId);
                 continue;
             }
 
-            cv::Mat roiBGR = currentFrameBGR(box);
+            // Only download candidate box ROI on-demand
+            cv::cuda::GpuMat roiGpu = latestInferenceFrameGpu(box);
+            cv::Mat roiRaw;
+            roiGpu.download(roiRaw);
+
+            cv::Mat roiBGR;
+            if (roiRaw.channels() == 4)
+                cv::cvtColor(roiRaw, roiBGR, cv::COLOR_BGRA2BGR);
+            else
+                roiBGR = roiRaw;
+
             cv::Mat hsv, mask;
             cv::cvtColor(roiBGR, hsv, cv::COLOR_BGR2HSV);
             cv::inRange(hsv,

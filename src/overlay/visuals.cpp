@@ -102,13 +102,23 @@ void displayThread()
                     box.width  = static_cast<int>(box.width  * boxScaleX);
                     box.height = static_cast<int>(box.height * boxScaleY);
 
-                    cv::rectangle(displayFrame, box, cv::Scalar(0, 255, 0), 2);
+                    cv::Scalar boxColor = (classes[i] == config.class_head) ? cv::Scalar(0, 0, 255)
+                                        : ((classes[i] == config.class_dead_body) ? cv::Scalar(180, 180, 180)
+                                        : cv::Scalar(0, 255, 0));
+
+                    cv::rectangle(displayFrame, box, boxColor, 2);
+
+                    std::string label = (classes[i] == config.class_head) ? "Head"
+                                      : ((classes[i] == config.class_player) ? "Player"
+                                      : ((classes[i] == config.class_dead_body) ? "Dead"
+                                      : std::to_string(classes[i])));
+
                     cv::putText(displayFrame,
-                        std::to_string(classes[i]),
+                        label,
                         cv::Point(box.x, box.y - 5),
                         cv::FONT_HERSHEY_SIMPLEX,
                         0.5,
-                        cv::Scalar(0, 255, 0),
+                        boxColor,
                         1);
                 }
             }

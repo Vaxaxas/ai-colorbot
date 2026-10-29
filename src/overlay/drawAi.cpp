@@ -67,12 +67,23 @@ void drawAi()
     ImGui::Separator();
 
     ImGui::TextUnformatted("Per-Class Detection & Color Filters");
-    static const char* classNames[] = {
-        "Player","Bot","Weapon","Outline","Dead Body",
-        "Target A","Target B",
-        "Head","Smoke","Fire","Third Person"
+    auto getClassName = [&](int i) -> std::string {
+        if (i == config.class_player) return "Player";
+        if (i == config.class_head) return "Head";
+        if (i == config.class_dead_body) return "Dead Body";
+        if (i == config.class_bot) return "Bot";
+        if (i == config.class_weapon) return "Weapon";
+        if (i == config.class_outline) return "Outline";
+        if (i == config.class_hideout_target_human) return "Target A";
+        if (i == config.class_hideout_target_balls) return "Target B";
+        if (i == config.class_smoke) return "Smoke";
+        if (i == config.class_fire) return "Fire";
+        if (i == config.class_third_person) return "Third Person";
+        return "Class " + std::to_string(i);
     };
-    constexpr int NUM_CLASSES = IM_ARRAYSIZE(classNames);
+
+    int numClassesCount = static_cast<int>(config.detect.size());
+    if (numClassesCount > 11) numClassesCount = 11;
 
     if (ImGui::BeginTable("ClassesTable", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
@@ -81,7 +92,7 @@ void drawAi()
         ImGui::TableSetupColumn("Color Filter On", ImGuiTableColumnFlags_WidthFixed,  80.0f);
         ImGui::TableHeadersRow();
 
-        for (int i = 0; i < NUM_CLASSES; ++i)
+        for (int i = 0; i < numClassesCount; ++i)
         {
             ImGui::TableNextRow();
             ImGui::TableSetColumnIndex(0);
@@ -95,7 +106,8 @@ void drawAi()
             if (!config.detect[i]) ImGui::BeginDisabled();
 
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextUnformatted(classNames[i]);
+            std::string displayName = getClassName(i);
+            ImGui::TextUnformatted(displayName.c_str());
 
             ImGui::TableSetColumnIndex(2);
             bool colorVal = config.color[i];
