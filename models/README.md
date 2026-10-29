@@ -20,3 +20,4 @@ trtexec --onnx=yolo10n.onnx --saveEngine=yolo10n.engine --fp16
 | YOLOv10n    | `yolo10`            |
 | YOLOv11n    | `yolo11`            |
 | YOLOv12n    | `yolo12`            |
+| YOLO26n     | `yolo26`            |

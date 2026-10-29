@@ -250,8 +250,8 @@ void Detector::initialize(const std::string& modelFile)
     {
         const auto& mainOut = outputNames[0];
         auto outDims = context->getTensorShape(mainOut.c_str());
-        numClasses = (config.postprocess == "yolo10")
-            ? 11
+        numClasses = (config.postprocess == "yolo10" || config.postprocess == "yolo26")
+            ? static_cast<int>(config.detect.size())
             : static_cast<int>(outDims.d[1] - 4);
     }
 
@@ -539,15 +539,36 @@ void Detector::postProcess(const float* output, const std::string& outputName)
 
     std::vector<Detection> detections;
 
-    if (config.postprocess == "yolo10")
+    if (config.postprocess == "yolo10" || config.postprocess == "yolo26")
     {
-        detections = postProcessYolo10(
-            output,
-            outputShapes[outputName],
-            numClasses,
-            config.confidence_threshold,
-            config.nms_threshold
-        );
+        const auto& shape = outputShapes[outputName];
+        if (shape.size() == 3 && shape[2] == 6)
+        {
+            // End-to-end NMS-free format [batch, numDetections, 6] (cx, cy, x2, y2, conf, classId)
+            detections = postProcessYolo10(
+                output,
+                shape,
+                numClasses,
+                config.confidence_threshold,
+                config.nms_threshold
+            );
+        }
+        else
+        {
+            // Standard raw multi-head anchor format [batch, 4 + numClasses, numAnchors]
+            auto shapeDims = context->getTensorShape(outputName.c_str());
+            std::vector<int64_t> engineShape;
+            for (int i = 0; i < shapeDims.nbDims; ++i)
+                engineShape.push_back(shapeDims.d[i]);
+
+            detections = postProcessYolo11(
+                output,
+                engineShape,
+                numClasses,
+                config.confidence_threshold,
+                config.nms_threshold
+            );
+        }
     }
     else if (config.postprocess == "yolo8"  ||
              config.postprocess == "yolo9"  ||

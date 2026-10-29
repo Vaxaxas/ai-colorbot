@@ -36,7 +36,7 @@ void drawAi()
     ImGui::Separator();
 
     ImGui::TextUnformatted("Postprocess Engine");
-    static const char* ppOptions[] = { "yolo8", "yolo9", "yolo10", "yolo11", "yolo12" };
+    static const char* ppOptions[] = { "yolo8", "yolo9", "yolo10", "yolo11", "yolo12", "yolo26" };
     int ppIndex = 0;
     for (int i = 0; i < IM_ARRAYSIZE(ppOptions); ++i)
         if (config.postprocess == ppOptions[i])
