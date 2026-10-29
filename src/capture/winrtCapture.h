@@ -32,7 +32,7 @@ public:
     bool             IsInitialized() const { return m_initialized; }
 
 private:
-    bool initD3D();
+    bool initD3D(int monitorIndex);
     bool initCapture(int monitorIndex);
     bool createSharedTextureGPU();
     bool createStagingTextureCPU();

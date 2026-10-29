@@ -113,6 +113,7 @@ void MouseThread::pidMove(double targetX, double targetY)
     auto now = std::chrono::steady_clock::now();
     double dt = std::chrono::duration<double>(now - last_pid_time).count();
     if (dt < dtMin) dt = dtMin;
+    if (dt > 0.1)   dt = 0.1;
     last_pid_time = now;
 
     integral_x += errorX * dt;

@@ -127,10 +127,14 @@ MakcuConnection::~MakcuConnection()
     if (listening_thread_.joinable())
         listening_thread_.join();
 
-    if (is_udp_ && udp_socket_ != INVALID_SOCKET)
+    if (is_udp_)
     {
-        closesocket(udp_socket_);
-        udp_socket_ = INVALID_SOCKET;
+        if (udp_socket_ != INVALID_SOCKET)
+        {
+            closesocket(udp_socket_);
+            udp_socket_ = INVALID_SOCKET;
+        }
+        WSACleanup();
     }
 
     if (serial_.isOpen())

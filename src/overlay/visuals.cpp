@@ -126,6 +126,12 @@ void displayThread()
 
             cv::imshow("Debug", displayFrame);
             cv::waitKey(1);
+            try {
+                if (cv::getWindowProperty("Debug", cv::WND_PROP_VISIBLE) < 1.0)
+                {
+                    config.show_window = false;
+                }
+            } catch (...) {}
         }
         else
         {

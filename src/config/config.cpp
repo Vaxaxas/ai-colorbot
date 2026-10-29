@@ -114,9 +114,36 @@ bool Config::loadConfig(const std::string& filename)
         while (!val.empty() && isspace(static_cast<unsigned char>(val.back()))) val.pop_back();
         return val;
     };
-    auto getBool   = [&](const char* key, bool def)   { return ini.GetBoolValue("", key, def); };
-    auto getLong   = [&](const char* key, long def)   { return static_cast<int>(ini.GetLongValue("", key, def)); };
-    auto getDouble = [&](const char* key, double def) { return ini.GetDoubleValue("", key, def); };
+    auto getBool = [&](const char* key, bool def) {
+        std::string val = getString(key, def ? "true" : "false");
+        if (val.empty()) return def;
+        char c = static_cast<char>( tolower(static_cast<unsigned char>(val[0])) );
+        if (c == 't' || c == 'y' || c == '1') return true;
+        if (c == 'f' || c == 'n' || c == '0') return false;
+        return def;
+    };
+    auto getLong = [&](const char* key, long def) {
+        std::string val = getString(key, "");
+        if (val.empty()) return static_cast<int>(def);
+        try {
+            size_t idx = 0;
+            long res = std::stol(val, &idx, 0);
+            return (idx == val.size()) ? static_cast<int>(res) : static_cast<int>(def);
+        } catch (...) {
+            return static_cast<int>(def);
+        }
+    };
+    auto getDouble = [&](const char* key, double def) {
+        std::string val = getString(key, "");
+        if (val.empty()) return def;
+        try {
+            size_t idx = 0;
+            double res = std::stod(val, &idx);
+            return (idx == val.size()) ? res : def;
+        } catch (...) {
+            return def;
+        }
+    };
 
     capture_method       = getString("capture_method", "winrt");
     detection_resolution = getLong("detection_resolution", 320);

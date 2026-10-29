@@ -61,7 +61,13 @@ void udpListenerThread()
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = INADDR_ANY;
     serverAddr.sin_port = htons(5005);
-    bind(sock, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr));
+    if (bind(sock, reinterpret_cast<sockaddr*>(&serverAddr), sizeof(serverAddr)) == SOCKET_ERROR)
+    {
+        std::cerr << "[UDP] Failed to bind port 5005 (error=" << WSAGetLastError() << "). Listener exiting." << std::endl;
+        closesocket(sock);
+        WSACleanup();
+        return;
+    }
     char buf[64];
     while (!shouldExit.load())
     {
@@ -180,6 +186,7 @@ void mouseThreadFunction(MouseThread& mouseThread)
         if (doAim != lastAimState)
         {
             lastAimState = doAim;
+            mouseThread.resetPID();
             if (doAim && config.verbose)
                 std::cout << "[Aim] Key active -> tracking" << std::endl;
         }

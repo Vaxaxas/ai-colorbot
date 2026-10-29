@@ -250,7 +250,8 @@ void Detector::initialize(const std::string& modelFile)
     {
         const auto& mainOut = outputNames[0];
         auto outDims = context->getTensorShape(mainOut.c_str());
-        numClasses = (config.postprocess == "yolo10" || config.postprocess == "yolo26")
+        bool isEndToEnd = (outDims.nbDims == 3 && outDims.d[2] == 6);
+        numClasses = ((config.postprocess == "yolo10" || config.postprocess == "yolo26") && isEndToEnd)
             ? static_cast<int>(config.detect.size())
             : static_cast<int>(outDims.d[1] - 4);
     }
@@ -404,7 +405,15 @@ void Detector::inferenceThread()
             if (frameReady)
             {
                 frame = std::move(currentFrame);
-                frame.download(currentFrameBGR);
+                bool needColorFilter = false;
+                {
+                    std::lock_guard<std::mutex> cfgLock(configMutex);
+                    for (bool c : config.color) {
+                        if (c) { needColorFilter = true; break; }
+                    }
+                }
+                if (needColorFilter)
+                    frame.download(currentFrameBGR);
                 frameReady   = false;
                 hasNewFrame  = true;
             }
@@ -537,9 +546,22 @@ void Detector::postProcess(const float* output, const std::string& outputName)
 {
     if (numClasses <= 0) return;
 
+    std::string postprocMode;
+    float confThresh = 0.25f;
+    float nmsThresh  = 0.50f;
+    int detRes       = 320;
+    {
+        std::lock_guard<std::mutex> cfgLock(configMutex);
+        postprocMode = config.postprocess;
+        confThresh   = config.confidence_threshold;
+        nmsThresh    = config.nms_threshold;
+        detRes       = config.detection_resolution;
+    }
+    img_scale = static_cast<float>(detRes) / 640.0f;
+
     std::vector<Detection> detections;
 
-    if (config.postprocess == "yolo10" || config.postprocess == "yolo26")
+    if (postprocMode == "yolo10" || postprocMode == "yolo26")
     {
         const auto& shape = outputShapes[outputName];
         if (shape.size() == 3 && shape[2] == 6)
@@ -549,8 +571,8 @@ void Detector::postProcess(const float* output, const std::string& outputName)
                 output,
                 shape,
                 numClasses,
-                config.confidence_threshold,
-                config.nms_threshold
+                confThresh,
+                nmsThresh
             );
         }
         else
@@ -561,19 +583,23 @@ void Detector::postProcess(const float* output, const std::string& outputName)
             for (int i = 0; i < shapeDims.nbDims; ++i)
                 engineShape.push_back(shapeDims.d[i]);
 
+            int rawClasses = (shapeDims.nbDims >= 2 && shapeDims.d[1] > 4)
+                ? static_cast<int>(shapeDims.d[1] - 4)
+                : numClasses;
+
             detections = postProcessYolo11(
                 output,
                 engineShape,
-                numClasses,
-                config.confidence_threshold,
-                config.nms_threshold
+                rawClasses,
+                confThresh,
+                nmsThresh
             );
         }
     }
-    else if (config.postprocess == "yolo8"  ||
-             config.postprocess == "yolo9"  ||
-             config.postprocess == "yolo11" ||
-             config.postprocess == "yolo12")
+    else if (postprocMode == "yolo8"  ||
+             postprocMode == "yolo9"  ||
+             postprocMode == "yolo11" ||
+             postprocMode == "yolo12")
     {
         auto shapeDims = context->getTensorShape(outputName.c_str());
         std::vector<int64_t> engineShape;
@@ -584,8 +610,8 @@ void Detector::postProcess(const float* output, const std::string& outputName)
             output,
             engineShape,
             numClasses,
-            config.confidence_threshold,
-            config.nms_threshold
+            confThresh,
+            nmsThresh
         );
     }
 
@@ -600,9 +626,9 @@ void Detector::postProcess(const float* output, const std::string& outputName)
             if (classId < 0 || classId >= static_cast<int>(config.detect.size())) continue;
             if (!config.detect[classId]) continue;
 
-            if (currentFrameBGR.empty()) continue;
-            cv::Rect box = det.box & cv::Rect(0, 0,
-                currentFrameBGR.cols, currentFrameBGR.rows);
+            int boundW = currentFrameBGR.empty() ? detRes : currentFrameBGR.cols;
+            int boundH = currentFrameBGR.empty() ? detRes : currentFrameBGR.rows;
+            cv::Rect box = det.box & cv::Rect(0, 0, boundW, boundH);
             if (box.area() <= 0 || box.width <= 0 || box.height <= 0) continue;
 
             // Head boxes nested inside a body box skip color filtering
@@ -625,7 +651,11 @@ void Detector::postProcess(const float* output, const std::string& outputName)
                 }
             }
 
-            if (!config.color[classId])
+            bool useColor = (classId >= 0 && classId < static_cast<int>(config.color.size()))
+                ? config.color[classId]
+                : false;
+
+            if (!useColor || currentFrameBGR.empty())
             {
                 detectedBoxes.push_back(box);
                 detectedClasses.push_back(classId);

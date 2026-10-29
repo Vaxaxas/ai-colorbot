@@ -9,6 +9,7 @@
 #include "capture/winrtCapture.h"
 #include "util/otherTools.h"
 #include "config/config.h"
+#include "app.h"
 
 template <typename T>
 static inline void SafeRelease(T** ppInterface)
@@ -33,7 +34,7 @@ WinRTScreenCapture::WinRTScreenCapture(int monitorIndex, int desiredWidth, int d
         // Apartment may already be initialized on this thread
     }
 
-    if (!initD3D())
+    if (!initD3D(monitorIndex))
     {
         std::cerr << "[WinRT] Failed to initialize Direct3D 11 device." << std::endl;
         return;
@@ -45,8 +46,14 @@ WinRTScreenCapture::WinRTScreenCapture(int monitorIndex, int desiredWidth, int d
         return;
     }
 
-    createSharedTextureGPU();
-    createStagingTextureCPU();
+    bool gpuOk = createSharedTextureGPU();
+    bool cpuOk = createStagingTextureCPU();
+    if ((config.capture_use_cuda && !gpuOk) || !cpuOk)
+    {
+        std::cerr << "[WinRT] Failed to create staging/shared textures (gpuOk="
+                  << gpuOk << ", cpuOk=" << cpuOk << ")." << std::endl;
+        return;
+    }
     m_cachedCpuFrame = cv::Mat::zeros(regionHeight, regionWidth, CV_8UC4);
 
     m_initialized = true;
@@ -87,7 +94,7 @@ WinRTScreenCapture::~WinRTScreenCapture()
     SafeRelease(&d3dDevice);
 }
 
-bool WinRTScreenCapture::initD3D()
+bool WinRTScreenCapture::initD3D(int monitorIndex)
 {
     D3D_FEATURE_LEVEL featureLevels[] = {
         D3D_FEATURE_LEVEL_11_1,
@@ -98,9 +105,39 @@ bool WinRTScreenCapture::initD3D()
 
     UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT;
     D3D_FEATURE_LEVEL featureLevel;
+
+    HMONITOR hMonitor = getMonitorHandleByIndex(monitorIndex);
+    if (!hMonitor)
+        hMonitor = MonitorFromPoint(POINT{ 0, 0 }, MONITOR_DEFAULTTOPRIMARY);
+
+    IDXGIAdapter1* targetAdapter = nullptr;
+    IDXGIFactory1* factory = nullptr;
+    if (SUCCEEDED(CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory))) && factory)
+    {
+        IDXGIAdapter1* adapter = nullptr;
+        for (UINT ai = 0; factory->EnumAdapters1(ai, &adapter) != DXGI_ERROR_NOT_FOUND; ++ai)
+        {
+            IDXGIOutput* output = nullptr;
+            for (UINT oi = 0; adapter->EnumOutputs(oi, &output) != DXGI_ERROR_NOT_FOUND; ++oi)
+            {
+                DXGI_OUTPUT_DESC outDesc{};
+                if (SUCCEEDED(output->GetDesc(&outDesc)) && outDesc.Monitor == hMonitor)
+                {
+                    targetAdapter = adapter;
+                    output->Release();
+                    break;
+                }
+                output->Release();
+            }
+            if (targetAdapter) break;
+            adapter->Release();
+        }
+        factory->Release();
+    }
+
     HRESULT hr = D3D11CreateDevice(
-        nullptr,
-        D3D_DRIVER_TYPE_HARDWARE,
+        targetAdapter,
+        targetAdapter ? D3D_DRIVER_TYPE_UNKNOWN : D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
         flags,
         featureLevels,
@@ -111,6 +148,7 @@ bool WinRTScreenCapture::initD3D()
         &d3dContext
     );
 
+    if (targetAdapter) targetAdapter->Release();
     return SUCCEEDED(hr);
 }
 
@@ -249,40 +287,42 @@ cv::cuda::GpuMat WinRTScreenCapture::GetNextFrameGpu()
         return cv::cuda::GpuMat();
 
     auto frame = m_framePool.TryGetNextFrame();
-    if (frame)
-    {
-        auto surface = frame.Surface();
-        if (surface)
-        {
-            try
-            {
-                auto access = surface.as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-                winrt::com_ptr<ID3D11Texture2D> surfaceTex;
-                if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&surfaceTex))) && surfaceTex)
-                {
-                    D3D11_TEXTURE2D_DESC desc;
-                    surfaceTex->GetDesc(&desc);
-                    UINT texW = desc.Width;
-                    UINT texH = desc.Height;
-                    UINT startX = (texW > static_cast<UINT>(regionWidth)) ? (texW - regionWidth) / 2 : 0;
-                    UINT startY = (texH > static_cast<UINT>(regionHeight)) ? (texH - regionHeight) / 2 : 0;
-                    UINT endX = startX + regionWidth;
-                    UINT endY = startY + regionHeight;
+    if (!frame)
+        return cv::cuda::GpuMat();
 
-                    if (endX <= texW && endY <= texH)
-                    {
-                        D3D11_BOX box{ startX, startY, 0u, endX, endY, 1u };
-                        d3dContext->CopySubresourceRegion(sharedTexture, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
-                        m_hasValidFrame = true;
-                    }
+    bool copied = false;
+    auto surface = frame.Surface();
+    if (surface)
+    {
+        try
+        {
+            auto access = surface.as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+            winrt::com_ptr<ID3D11Texture2D> surfaceTex;
+            if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&surfaceTex))) && surfaceTex)
+            {
+                D3D11_TEXTURE2D_DESC desc;
+                surfaceTex->GetDesc(&desc);
+                UINT texW = desc.Width;
+                UINT texH = desc.Height;
+                UINT startX = (texW > static_cast<UINT>(regionWidth)) ? (texW - regionWidth) / 2 : 0;
+                UINT startY = (texH > static_cast<UINT>(regionHeight)) ? (texH - regionHeight) / 2 : 0;
+                UINT endX = startX + regionWidth;
+                UINT endY = startY + regionHeight;
+
+                if (endX <= texW && endY <= texH)
+                {
+                    D3D11_BOX box{ startX, startY, 0u, endX, endY, 1u };
+                    d3dContext->CopySubresourceRegion(sharedTexture, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
+                    copied = true;
+                    m_hasValidFrame = true;
                 }
             }
-            catch (...) {}
         }
-        frame.Close();
+        catch (...) {}
     }
+    frame.Close();
 
-    if (!m_hasValidFrame)
+    if (!copied)
         return cv::cuda::GpuMat();
 
     cv::cuda::GpuMat gpu(regionHeight, regionWidth, CV_8UC4);
@@ -309,52 +349,54 @@ cv::Mat WinRTScreenCapture::GetNextFrameCpu()
         return cv::Mat();
 
     auto frame = m_framePool.TryGetNextFrame();
-    if (frame)
+    if (!frame)
+        return cv::Mat();
+
+    bool copied = false;
+    auto surface = frame.Surface();
+    if (surface)
     {
-        auto surface = frame.Surface();
-        if (surface)
+        try
         {
-            try
+            auto access = surface.as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
+            winrt::com_ptr<ID3D11Texture2D> surfaceTex;
+            if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&surfaceTex))) && surfaceTex)
             {
-                auto access = surface.as<Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
-                winrt::com_ptr<ID3D11Texture2D> surfaceTex;
-                if (SUCCEEDED(access->GetInterface(IID_PPV_ARGS(&surfaceTex))) && surfaceTex)
+                D3D11_TEXTURE2D_DESC desc;
+                surfaceTex->GetDesc(&desc);
+                UINT texW = desc.Width;
+                UINT texH = desc.Height;
+                UINT startX = (texW > static_cast<UINT>(regionWidth)) ? (texW - regionWidth) / 2 : 0;
+                UINT startY = (texH > static_cast<UINT>(regionHeight)) ? (texH - regionHeight) / 2 : 0;
+                UINT endX = startX + regionWidth;
+                UINT endY = startY + regionHeight;
+
+                if (endX <= texW && endY <= texH)
                 {
-                    D3D11_TEXTURE2D_DESC desc;
-                    surfaceTex->GetDesc(&desc);
-                    UINT texW = desc.Width;
-                    UINT texH = desc.Height;
-                    UINT startX = (texW > static_cast<UINT>(regionWidth)) ? (texW - regionWidth) / 2 : 0;
-                    UINT startY = (texH > static_cast<UINT>(regionHeight)) ? (texH - regionHeight) / 2 : 0;
-                    UINT endX = startX + regionWidth;
-                    UINT endY = startY + regionHeight;
+                    D3D11_BOX box{ startX, startY, 0u, endX, endY, 1u };
+                    d3dContext->CopySubresourceRegion(stagingTextureCPU, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
 
-                    if (endX <= texW && endY <= texH)
+                    D3D11_MAPPED_SUBRESOURCE mapped;
+                    if (SUCCEEDED(d3dContext->Map(stagingTextureCPU, 0, D3D11_MAP_READ, 0, &mapped)))
                     {
-                        D3D11_BOX box{ startX, startY, 0u, endX, endY, 1u };
-                        d3dContext->CopySubresourceRegion(stagingTextureCPU, 0, 0, 0, 0, surfaceTex.get(), 0, &box);
-
-                        D3D11_MAPPED_SUBRESOURCE mapped;
-                        if (SUCCEEDED(d3dContext->Map(stagingTextureCPU, 0, D3D11_MAP_READ, 0, &mapped)))
+                        for (int y = 0; y < regionHeight; ++y)
                         {
-                            for (int y = 0; y < regionHeight; ++y)
-                            {
-                                memcpy(m_cachedCpuFrame.ptr(y),
-                                       static_cast<BYTE*>(mapped.pData) + y * mapped.RowPitch,
-                                       static_cast<size_t>(regionWidth) * 4);
-                            }
-                            d3dContext->Unmap(stagingTextureCPU, 0);
-                            m_hasValidFrame = true;
+                            memcpy(m_cachedCpuFrame.ptr(y),
+                                   static_cast<BYTE*>(mapped.pData) + y * mapped.RowPitch,
+                                   static_cast<size_t>(regionWidth) * 4);
                         }
+                        d3dContext->Unmap(stagingTextureCPU, 0);
+                        copied = true;
+                        m_hasValidFrame = true;
                     }
                 }
             }
-            catch (...) {}
         }
-        frame.Close();
+        catch (...) {}
     }
+    frame.Close();
 
-    if (!m_hasValidFrame)
+    if (!copied)
         return cv::Mat();
 
     return m_cachedCpuFrame.clone();
